@@ -1,0 +1,6 @@
+{
+  "site_id": "test_ohrc_site",
+  "source_image": "source_mock.cub",
+  "reference_image": "reference_mock.cub",
+  "matches": []
+}
