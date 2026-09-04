@@ -14,6 +14,12 @@ class LoFTRMatcher:
 
     def _prepare_tensor(self, img_np):
         """Convert numpy image (H, W) [0, 255] to Tensor (1, 1, H, W) [0, 1]"""
+        # STRICT ASSERTIONS ADDED HERE
+        if not isinstance(img_np, np.ndarray):
+            raise TypeError(f"[LoFTR Data Error] Expected numpy array, got {type(img_np)}. Did a geotransform tuple leak into the image variable?")
+        if len(img_np.shape) != 2:
+            raise ValueError(f"[LoFTR Data Error] Expected 2D grayscale image (H, W), got shape {img_np.shape}.")
+            
         t = torch.tensor(img_np, dtype=torch.float32).unsqueeze(0).unsqueeze(0) / 255.0
         return t.to(self.device)
 
