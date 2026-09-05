@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import numpy as np
 import cv2
@@ -46,14 +47,25 @@ def run_evaluation(site_id):
     dem_path, dem_pixel_scale = get_dem(site_id)
     spice = get_spice_kernels(site_id)
 
-    with rasterio.open(products['source_image_path']) as src:
-        source_img = src.read(1)
+    ohrc_path = products.get('source_image_path') or products.get('source_image')
+    nac_path = products.get('reference_image_path') or products.get('reference_image')
+
+    def load_tif(filepath):
+        if not os.path.exists(filepath):
+            print(f"[!] ERROR: Missing file {filepath}")
+            sys.exit(1)
+        with rasterio.open(filepath) as src:
+            return src.read(1).astype(np.float32)
+
+    source_img = load_tif(ohrc_path)
+    raw_ref_img = load_tif(nac_path)
+    dem_data = load_tif(dem_path)
+
+    with rasterio.open(ohrc_path) as src:
         src_res = src.res[0]
-    with rasterio.open(products['reference_image_path']) as ref:
-        raw_ref_img = ref.read(1)
+    with rasterio.open(nac_path) as ref:
         ref_res = ref.res[0]
     with rasterio.open(dem_path) as dem_file:
-        dem_data = dem_file.read(1)
         dem_res = dem_file.res[0]
 
     res_ratio = dem_res / src_res
