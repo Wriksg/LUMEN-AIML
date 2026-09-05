@@ -57,10 +57,11 @@ def run_evaluation(site_id):
         with rasterio.open(filepath) as src:
             return src.read(1).astype(np.float32)
 
-    source_img = load_tif(ohrc_path)
-    raw_ref_img = load_tif(nac_path)
-    dem_data = load_tif(dem_path)
+    ohrc_img = load_tif(ohrc_path)
+    nac_img = load_tif(nac_path)
+    dem_img = load_tif(dem_path)
 
+    # Retrieve native resolutions using rasterio
     with rasterio.open(ohrc_path) as src:
         src_res = src.res[0]
     with rasterio.open(nac_path) as ref:
@@ -71,13 +72,13 @@ def run_evaluation(site_id):
     res_ratio = dem_res / src_res
 
     print("\n[STEP 1: MULTI-RESOLUTION RATIO AUDIT]")
-    print(f"  -> OHRC Source Native Pixel Scale : {src_res:.4f} m/px ({source_img.shape[1]}x{source_img.shape[0]} px)")
-    print(f"  -> LRO NAC Reference Pixel Scale  : {ref_res:.4f} m/px ({raw_ref_img.shape[1]}x{raw_ref_img.shape[0]} px)")
-    print(f"  -> SLDEM2015 Native Pixel Scale   : {dem_res:.1f} m/px ({dem_data.shape[1]}x{dem_data.shape[0]} cells)")
+    print(f"  -> OHRC Source Native Pixel Scale : {src_res:.4f} m/px ({ohrc_img.shape[1]}x{ohrc_img.shape[0]} px)")
+    print(f"  -> LRO NAC Reference Pixel Scale  : {ref_res:.4f} m/px ({nac_img.shape[1]}x{nac_img.shape[0]} px)")
+    print(f"  -> SLDEM2015 Native Pixel Scale   : {dem_res:.1f} m/px ({dem_img.shape[1]}x{dem_img.shape[0]} cells)")
     print(f"  -> DEM to OHRC Resolution Ratio   : {res_ratio:.1f}x Resolution Disparity")
 
-    # 2. PRISM Physical Relighting (Unmodified Pipeline Math)
-    normals = compute_surface_normals(dem_data, dem_pixel_scale)
+    # 2. PRISM Physical Relighting
+    normals = compute_surface_normals(dem_img, dem_pixel_scale)
     src_az = spice['source_sun_azimuth']
     src_el = spice['source_sun_elevation']
     ref_az = spice['ref_sun_azimuth']
@@ -87,15 +88,15 @@ def run_evaluation(site_id):
     ref_sun_vec = get_sun_vector(ref_az, ref_el)
 
     relit_ref_img, smooth_corr, meta = apply_lunar_lambert(
-        raw_ref_img, normals, src_sun_vec, ref_sun_vec
+        nac_img, normals, src_sun_vec, ref_sun_vec
     )
 
     # 3. Radiometric Sanity Diagnostics
-    raw_min, raw_max = int(np.min(raw_ref_img)), int(np.max(raw_ref_img))
+    raw_min, raw_max = int(np.min(nac_img)), int(np.max(nac_img))
     relit_min, relit_max = int(np.min(relit_ref_img)), int(np.max(relit_ref_img))
-    raw_global_std = float(np.std(raw_ref_img))
+    raw_global_std = float(np.std(nac_img))
     relit_global_std = float(np.std(relit_ref_img))
-    raw_local_std = compute_local_contrast(raw_ref_img)
+    raw_local_std = compute_local_contrast(nac_img)
     relit_local_std = compute_local_contrast(relit_ref_img)
 
     print("\n[STEP 3: RADIOMETRIC & DYNAMIC RANGE AUDIT]")
@@ -107,8 +108,8 @@ def run_evaluation(site_id):
     diag_dir = "diagnostic_crops"
     os.makedirs(diag_dir, exist_ok=True)
     comparison_panel = np.hstack([
-        source_img[:512, :512],
-        raw_ref_img[:512, :512],
+        ohrc_img[:512, :512],
+        nac_img[:512, :512],
         relit_ref_img[:512, :512]
     ])
     cv2.imwrite(os.path.join(diag_dir, "real_site_ablation_side_by_side.png"), comparison_panel)
@@ -117,10 +118,10 @@ def run_evaluation(site_id):
     # 4. Feature Matching
     matcher = LoFTRMatcher()
     print("\n[LoFTR] Matching Source (OHRC) vs RAW Reference (NAC)...")
-    mkpts0_raw, mkpts1_raw, conf_raw = matcher.match(source_img, raw_ref_img)
+    mkpts0_raw, mkpts1_raw, conf_raw = matcher.match(ohrc_img, nac_img)
     
     print("\n[LoFTR] Matching Source (OHRC) vs PRISM-RELIT Reference (NAC)...")
-    mkpts0_relit, mkpts1_relit, conf_relit = matcher.match(source_img, relit_ref_img)
+    mkpts0_relit, mkpts1_relit, conf_relit = matcher.match(ohrc_img, relit_ref_img)
 
     # 5. RANSAC Fitting & Spatial Distribution
     def fit_transform(pts0, pts1):
@@ -134,7 +135,7 @@ def run_evaluation(site_id):
     inliers_raw, ratio_raw, H_raw, mask_raw = fit_transform(mkpts0_raw, mkpts1_raw)
     inliers_relit, ratio_relit, H_relit, mask_relit = fit_transform(mkpts0_relit, mkpts1_relit)
 
-    cov_raw = compute_spatial_bounding_box_coverage(mkpts1_raw, raw_ref_img.shape)
+    cov_raw = compute_spatial_bounding_box_coverage(mkpts1_raw, nac_img.shape)
     cov_relit = compute_spatial_bounding_box_coverage(mkpts1_relit, relit_ref_img.shape)
 
     # 6. Checkpoints & RMSE Evaluation
